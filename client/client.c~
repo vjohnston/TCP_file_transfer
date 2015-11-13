@@ -1,41 +1,136 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <time.h>
 #include <math.h>
+#include <dirent.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h>
-#include <openssl/md5.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <unistd.h>
-#define MAX_MD5LENGTH 100
+#include <openssl/md5.h>
+#define MAX_MD5LENGTH 50
 #define MAX_FILENAME 100
-int
-main(int argc, char * argv[])
+
+void requestFile(int s){
+	char query[20];
+	char filename[MAX_FILENAME];
+	char md5server[MAX_MD5LENGTH];
+	int filelen;
+	int32_t filesize;
+	float nBytes, start_time, end_time, throughput;
+	struct timeval tv;
+	// receive query from server
+	memset(query,'\0',sizeof(query));
+	while(strlen(query)==0){
+		recv(s,query,sizeof(query),0);
+	}
+	if (strlen(query)==0) return;
+	// get filename from user
+	printf("%s ",query);
+	scanf("%s",&filename);
+	// send length of filename and filename
+	filelen = strlen(filename);
+	if (send(s,&filelen,sizeof(filelen),0)==-1){
+		perror("client send error."); exit(1);
+	}
+	if (send(s,filename,sizeof(filename),0)==-1){
+		perror("client send error."); exit(1);
+	}
+	// receive and decode file size
+	filesize = 0;
+	while (filesize==0){
+		recv(s,&filesize,sizeof(int32_t),0);
+	}
+	if (filesize==-1){
+		printf("File does not exist\n");
+		return;
+	}
+	// receive md5 hash from server
+	memset(md5server,'\0',sizeof(md5server));
+	while (strlen(md5server)<=0){
+		recv(s,md5server,sizeof(md5server),0);
+	}
+	printf("%s",md5server);
+	fflush(stdout);
+	// Calculate starting time
+	gettimeofday(&tv,NULL);
+	start_time = tv.tv_usec;
+	// receive file from server
+	FILE *ofp = fopen(filename,"w");
+	int n;
+	char line[20000];
+	memset(line,'\0',sizeof(line));
+	while (nBytes < filesize) {
+		n=recv(s,line,sizeof(line),0);
+		nBytes += n;
+		fwrite(line,sizeof(char),n,ofp);
+		memset(line,'\0',sizeof(line));
+	}
+	// get end time and throughput
+	gettimeofday(&tv,NULL);
+	end_time = tv.tv_usec; //in microsecond
+	float RTT = (end_time-start_time) * pow(10,-6); //RTT in seconds
+	throughput = (nBytes*pow(10,-6))/RTT;
+	// work out md5 hash of received file and compare them
+	int size = filesize;
+	unsigned char md5[MD5_DIGEST_LENGTH];
+	char* file_buffer = (char*) malloc(20000);
+	int file_description;
+
+	file_description = open(filename,O_RDONLY);
+	file_buffer = mmap(0,size, PROT_READ, MAP_SHARED, file_description, 0);
+	MD5((unsigned char*) file_buffer, size, md5);
+	munmap(file_buffer, size);
+	// turn md5hash into a string
+	int i,j;
+	char str[2*MD5_DIGEST_LENGTH+2];
+	memset(str,'\0',sizeof(str));
+	char str2[2];
+	for(i=0; i<MD5_DIGEST_LENGTH; i++) {
+		sprintf(str2,"%02x",md5[i]);
+		str[i*2]=str2[0];
+		str[(i*2)+1]=str2[1];
+	}
+        str[2*MD5_DIGEST_LENGTH]='\0';
+	// compare the md5 hashes
+	if (strcmp(md5server,str)==0){
+		printf("Transfer successful! Throughput: %f\n",throughput);
+	} else {
+		printf("Transfer unsuccessful.\n");
+	}
+}
+
+void uploadFile(int s){
+
+}
+
+void listDirectory(int s){
+
+}
+
+void deleteFile(int s){
+
+}
+
+int main(int argc, char * argv[])
 {
 	// declare variables
 	FILE *fp;
 	struct hostent *hp;
 	struct sockaddr_in sin;
-	struct timeval tv;
 	char *host;
-	char md5server[MAX_MD5LENGTH];
-	unsigned char md5client[MD5_DIGEST_LENGTH];
-	char* file_buffer = (char*) malloc(20000);
-	int file_description;
-	char *filename;
 	int s, len, server_port;
-	float start_time, end_time, nBytes, throughput;
   
 	// Inputs: client host port filename
-  	if (argc==4) {
+  	if (argc==3) {
     		host = argv[1];
 		server_port = atoi(argv[2]);
-		filename = argv[3];
 	} else {
 		fprintf(stderr, "usage: simplex-talk host\n");
 		exit(1);
@@ -63,85 +158,29 @@ main(int argc, char * argv[])
     		perror("simplex-talk: connect");
     		close(s); exit(1);
   	}
-  	
-	/* send file length and file name to server */
-	len = strlen(filename)+1;
-    	if(send(s, filename, len, 0)==-1){
-    		perror("client send error!"); exit(1);
-    	}
+
+	while(1){
+		char command[10];
+		// prompt user to enter operation
+		printf("Enter REQ, UPL, LIS, DEL or XIT: ");
+		scanf("%s",&command);
+		// send command to server
+		if (send(s,command,sizeof(command),0)==-1){
+			perror("client send error!"); exit(1);
+		}
 	
-	/* receive file size and check if valid */
-	char file_size[30];
-	if ((recv(s,file_size,sizeof(file_size),0))==-1){
-		perror("Client receiver error!"); exit(1);
+		// evaluate command
+		if (strcmp(command,"REQ")==0){
+			requestFile(s);
+		} else if (strcmp(command,"UPL")==0){
+			uploadFile(s);
+		} else if (strcmp(command,"LIS")==0){
+			listDirectory(s);
+		} else if (strcmp(command,"DEL")==0){
+			deleteFile(s);
+		} else if (strcmp(command,"XIT")==0){
+			close(s);
+			exit(1);
+		}
 	}
-	if (atoi(file_size)<0){
-		perror("File does not exist"); exit(1);
-	}
-	
-	/* If the file size is valid keep receiving MD5 hash of file */
-	memset(md5server,'\0',sizeof(md5server));
-	while(strlen(md5server)==0){
-		recv(s,md5server,sizeof(md5server),0);
-	}
-	md5server[strlen(md5server)] = '\0';
-	
-	/* Calculate starting time */
-	gettimeofday(&tv,NULL);
-	start_time = tv.tv_usec;
-	
-	/* receive the file from the server. Get line by line and save to file */
-	FILE *ofp = fopen(filename,"w");
-	int n;
-	char line[20000];
-	memset(line,'\0',sizeof(line));
-	while (nBytes < atoi(file_size)) {
-		n=recv(s,line,sizeof(line),0);
-		nBytes += n;
-		fwrite(line,sizeof(char),n,ofp);
-		memset(line,'\0',sizeof(line));
-	}
-
-	/* Calculate end time and throughput of file transfer */
-	gettimeofday(&tv,NULL);
-	end_time = tv.tv_usec; //in microsecond
-	float RTT = (end_time-start_time) * pow(10,-6); //RTT in seconds
-	throughput = (nBytes*pow(10,-6))/RTT;
-
-	/* close server connection */
-  	close(s);
-
-	fclose(ofp);
-	/* open file and get md5 hash*/
-	int size = atoi(file_size);
-	file_description = open(filename,O_RDONLY);
-	file_buffer = mmap(0,size, PROT_READ, MAP_SHARED, file_description, 0);
-	MD5((unsigned char*) file_buffer, size, md5client);
-	munmap(file_buffer, size);
-
-	/* turn md5hash into a string */
-	int i,j;
-	char str[2*MD5_DIGEST_LENGTH+2];
-	memset(str,'\0',sizeof(str));
-	char str2[2];
-	for(i=0; i<MD5_DIGEST_LENGTH; i++) {
-		sprintf(str2,"%02x",md5client[i]);
-		str[i*2]=str2[0];
-		str[(i*2)+1]=str2[1];
-	}
-        str[2*MD5_DIGEST_LENGTH]='\0';
-
-	char md5str[strlen(str)+1];
-	memcpy(md5str,str,strlen(str));
-	md5str[strlen(str)] = '\0';
-
-	/* compare md5 from server (MD5server) to md5 form client (MD5client)*/
-	if (strcmp(md5server,md5str)!=0){
-		printf("File hashes do not match - bad transfer\n");
-		exit(1);
-	} else {
-		printf("Hash matches\n");
-		printf("%.0f bytes transferred in %f seconds. Throughput: %f Megabytes/sec. File MDSum: %s.\n",nBytes,RTT,throughput,md5server);
-	}
-	exit(1);
 }
