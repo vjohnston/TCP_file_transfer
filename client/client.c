@@ -12,10 +12,12 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <time.h>
 #define MAX_MD5LENGTH 100
 #define MAX_FILENAME 100
-int
-main(int argc, char * argv[])
+
+
+int main(int argc, char * argv[])
 {
 	// declare variables
 	FILE *fp;
