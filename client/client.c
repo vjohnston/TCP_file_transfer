@@ -14,12 +14,40 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <time.h>
-#define MAX_MD5LENGTH 100
-#define MAX_FILENAME 100
-
+#include <sys/time.h>
 #include <openssl/md5.h>
 #define MAX_MD5LENGTH 50
 #define MAX_FILENAME 100
+#define MAX_PENDING 5
+#define MAX_LINE 256
+
+int32_t file_exists(char * filename)
+{
+	FILE *file;
+	int32_t size;
+	if(file = fopen(filename, "r"))
+	{
+		fseek(file,0,SEEK_END);
+		size = ftell(file);
+		fseek(file,0,SEEK_SET);
+		fclose(file);
+		return size;
+	}
+	return -1;
+}
+
+void sendFile(int s, char *filename)
+{
+	char line[20000];
+	FILE *fp = fopen(filename, "r");
+	memset(line,'\0',sizeof(line));
+
+	while(fread(line,sizeof(char),sizeof(line),fp))
+	{
+		send(s, line,sizeof(line),0);
+		memset(line,'\0',sizeof(line));
+	}
+}
 
 void requestFile(int s){
 	char query[20];
@@ -99,7 +127,7 @@ void requestFile(int s){
 		str[i*2]=str2[0];
 		str[(i*2)+1]=str2[1];
 	}
-        str[2*MD5_DIGEST_LENGTH]='\0';
+	str[2*MD5_DIGEST_LENGTH]='\0';
 	// compare the md5 hashes
 	if (strcmp(md5server,str)==0){
 		printf("Transfer successful! Throughput: %f\n",throughput);
@@ -109,14 +137,162 @@ void requestFile(int s){
 }
 
 void uploadFile(int s){
+	// get and send filename to server
+	char filename[MAX_FILENAME];
+	int filelen;
+	char ack[4];
+	printf("Please enter filename you would like to send: ");
+	scanf("%s",filename);
+	filelen = strlen(filename);
+	if (send(s,&filelen,sizeof(filelen),0)==-1){
+		perror("client send error."); exit(1);
+	}
+	if (send(s,filename,sizeof(filename),0)==-1){
+		perror("client send error."); exit(1);
+	}
+	memset(ack,'\0',sizeof(ack));
+	while(strlen(ack)==0)
+	{
+		recv(s,ack,sizeof(ack),0);
+	}
 
+	if(strcmp(ack,"ACK") != 0)
+	{
+		printf("ACK not received");
+		return;
+	}
+
+	int32_t file_size = file_exists(filename);
+	printf("%i\n",file_size);
+	if(file_size == -1)
+	{
+		printf("File does not exist\n");
+		return;
+	}
+	printf("%i\n",file_size);
+	send(s,&file_size,sizeof(int32_t),0);
+	sendFile(s,filename);
+
+	//open file and get md5 hash
+	int size = file_size;
+	unsigned char md5[MD5_DIGEST_LENGTH];
+	char* file_buffer = (char*) malloc(20000);
+	int file_description;
+
+	file_description = open(filename,O_RDONLY);
+	file_buffer = mmap(0,size,PROT_READ,MAP_SHARED,file_description, 0);
+	MD5((unsigned char*) file_buffer, size, md5);
+	munmap(file_buffer, size);
+
+	//turn md5hash into a string
+	int i,j;
+	char str[2*MD5_DIGEST_LENGTH+2];
+	memset(str,'\0',sizeof(str));
+	char str2[2];
+	for(i=0; i<MD5_DIGEST_LENGTH; i++)
+	{
+		sprintf(str2,"%02x",md5[i]);
+		str[i*2]=str2[0];
+		str[(i*2)+1]=str2[1];
+	}
+	str[2*MD5_DIGEST_LENGTH]='\0';
+
+	char md5str[strlen(str)+1];
+	memcpy(md5str,str,strlen(str));
+	md5str[strlen(str)] = '\0';
+	send(s,md5str,strlen(str),0);
+
+	char *result;
+
+	while(strlen(result) == 0)
+	{
+		recv(s,result,sizeof(result),0);
+	}
+
+	if(!strcmp(result,"Unsuccessful transfer"))
+	{
+		printf("%s\n",result);
+	}
+	else
+	{
+		printf("%s\nSuccessful Transfer\n",result);
+	}
 }
 
 void listDirectory(int s){
 
+	int32_t size;
+	int n = 0;
+	int nBytes = 0;
+	char line[20000];
+	size = 0;
+	while(size == 0)
+	{
+		recv(s,&size,sizeof(size),0);
+	}
+	printf("%i\n",size);
+	memset(line,'\0',sizeof(line));
+	while(nBytes < size)
+	{
+		n = recv(s,line,sizeof(line),0);
+		nBytes += n;
+		printf("%s\n",line);
+		fflush(stdout);
+		memset(line,'\0',sizeof(line));
+	}
+
 }
 
 void deleteFile(int s){
+	char filename[MAX_FILENAME];
+	int filelen;
+	printf("Please enter filename you would like to send: ");
+	scanf("%s",&filename);
+	printf("%s\n",filename);
+	filelen = strlen(filename);
+	if (send(s,&filelen,sizeof(filelen),0)==-1){
+		perror("client send error."); exit(1);
+	}
+	if (send(s,filename,sizeof(filename),0)==-1){
+		perror("client send error."); exit(1);
+	}
+	
+	char*file_exists_str;
+	int file_exists = 0;
+
+	while(file_exists == 0)
+	{
+		recv(s,&file_exists,sizeof(file_exists),0);
+	}
+
+	//file_exists = atoi(file_exists_str);
+
+	if(file_exists == -1)
+	{
+		printf("File does not exist");
+		return;
+	}
+	char* response;
+	printf("File Exists\nWould you like to delete the file? (Yes\\No)\n");
+	scanf("%s",response);
+
+	send(s,response,sizeof(response),0);
+
+	int ack;
+
+	while(ack==0)
+	{
+		recv(s,&ack,sizeof(ack),0);
+	}
+
+	if(ack == 1)
+	{
+		printf("File deleted successfully");
+	}
+	else
+	{
+		printf("File not deleted");
+	}
 
 }
 
@@ -128,10 +304,10 @@ int main(int argc, char * argv[])
 	struct sockaddr_in sin;
 	char *host;
 	int s, len, server_port;
-  
+
 	// Inputs: client host port filename
-  	if (argc==3) {
-    		host = argv[1];
+	if (argc==3) {
+		host = argv[1];
 		server_port = atoi(argv[2]);
 	} else {
 		fprintf(stderr, "usage: simplex-talk host\n");
@@ -145,21 +321,21 @@ int main(int argc, char * argv[])
 		exit(1);
 	}
 
-  	/* build address data structure */
-  	bzero((char *)&sin, sizeof(sin));
-  	sin.sin_family = AF_INET;
-  	bcopy(hp->h_addr, (char *)&sin.sin_addr, hp->h_length);
-  	sin.sin_port = htons(server_port);
-    
-  	/* active open */
-  	if ((s = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-    		perror("simplex-talk: socket"); exit(1);
-  	}
+	/* build address data structure */
+	bzero((char *)&sin, sizeof(sin));
+	sin.sin_family = AF_INET;
+	bcopy(hp->h_addr, (char *)&sin.sin_addr, hp->h_length);
+	sin.sin_port = htons(server_port);
 
-  	if (connect(s, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
-    		perror("simplex-talk: connect");
-    		close(s); exit(1);
-  	}
+	/* active open */
+	if ((s = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+		perror("simplex-talk: socket"); exit(1);
+	}
+
+	if (connect(s, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+		perror("simplex-talk: connect");
+		close(s); exit(1);
+	}
 
 	while(1){
 		char command[10];
@@ -170,7 +346,7 @@ int main(int argc, char * argv[])
 		if (send(s,command,sizeof(command),0)==-1){
 			perror("client send error!"); exit(1);
 		}
-	
+
 		// evaluate command
 		if (strcmp(command,"REQ")==0){
 			requestFile(s);
