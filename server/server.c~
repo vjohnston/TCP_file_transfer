@@ -13,6 +13,7 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <sys/time.h>
 #include <openssl/md5.h>
 #define MAX_MD5LENGTH 50
 #define MAX_FILENAME 100
@@ -106,37 +107,43 @@ void clientRequest(int s){
 }
 
 void upload(int s){
-	int filename_len;
-	char file_len_str[10];
-	char filesize[32];
-	int32_t size;
+	int filename_len = 0;
+	int32_t filesize;
 	char md5client[100];
-	char * md5;
 	struct timeval tv;
 	float start_time, end_time, nBytes, throughput;
 	//get length of file and declare file name
-	memset(file_len_str,'\0',sizeof(file_len_str));
-	while(strlen(file_len_str)==0){
-		recv(s,file_len_str,sizeof(file_len_str),0);
+	while(filename_len<=0){
+		recv(s,&filename_len,sizeof(filename_len),0);
 	}
-	filename_len = atoi(file_len_str);
+	//filename_len = atoi(file_len_str);
+	printf("%i\n",filename_len);
 	char filename[filename_len+1];
 	//receive file name from client
 	memset(filename,'\0',sizeof(filename));
 	while(strlen(filename)==0){
 		recv(s,filename,sizeof(filename),0);
 	}
+
+	printf("%s\n",filename);
+	fflush(stdout);
 	//send ACK
 	char ack[4] = "ACK";
 	if(send(s,ack,sizeof(ack),0)==-1){
 		perror("Server send error!"); exit(1);
 	}
 	//receive size of file
-	memset(filesize,'\0',sizeof(filesize));
-	while(strlen(filesize)==0){
-		recv(s,filesize,sizeof(filesize),0);
+	filesize = 0;
+	printf("%i\n",filesize);
+	while(filesize == 0){
+		recv(s,&filesize,sizeof(int32_t),0);
 	}
-	size = atoi(filesize);
+	if (filesize==-1){
+		return;
+	}
+	printf("%i\n",filesize);
+	fflush(stdout);
+	/*//size = atoi(filesize);
 	// Calculate starting time 
 	gettimeofday(&tv,NULL);
 	start_time = tv.tv_usec;
@@ -145,7 +152,7 @@ void upload(int s){
 	int n;
 	char line[20000];
 	memset(line,'\0',sizeof(line));
-	while (nBytes < size) {
+	while (nBytes < filesize) {
 		n=recv(s,line,sizeof(line),0);
 		nBytes += n;
 		fwrite(line,sizeof(char),n,ofp);
@@ -162,61 +169,91 @@ void upload(int s){
 		recv(s,md5client,sizeof(md5client),0);
 	}
 	md5client[strlen(md5client)] = '\0';
-	//get md5 hash and send to client
-	memset(md5,'\0',sizeof(md5));
-	md5 = getMD5hash(filename);
-	if(send(s, md5,16,0)==-1){
-		perror("Server send error!"); exit(1);
+	//get md5 hash
+	int size = filesize;
+	unsigned char md5[MD5_DIGEST_LENGTH];
+	char* file_buffer = (char*) malloc(20000);
+	int file_description;
+
+	file_description = open(filename,O_RDONLY);
+	file_buffer = mmap(0,size,PROT_READ,MAP_SHARED,file_description,0);
+	MD5((unsigned char*) file_buffer, size, md5);
+	munmap(file_buffer, size);
+
+	int i,j;
+	char str[2*MD5_DIGEST_LENGTH+2];
+	memset(str,'\0',sizeof(str));
+	char str2[2];
+	for(i= 0; i<MD5_DIGEST_LENGTH; i++)
+	{
+		sprintf(str2,"%02x",md5[i]);
+		str[i*2]=str2[0];
+		str[(i*2)+1]=str2[1];
 	}
+	str[2*MD5_DIGEST_LENGTH]='\0';
+
+	char md5str[strlen(str)+1];
+	memcpy(md5str,str,strlen(str));
+	md5str[strlen(str)] = '\0';
+
+	//md5 = getMD5hash(filename);
+	// GET MD5 HASH SAME WAY AS RECEIVe
 	//compare md5 hash values. If they are the same send throughput
+	//
+	printf("%s\n",md5client);
+	printf("%s\n",md5str);
 	char *result;
-	if (strcmp(md5client,md5)==0){
+	if (strcmp(md5client,md5str)==0){
 		snprintf(result,100,"%f",throughput);
 	} else {
 		result = "Unsuccessful transfer";
 	}
 	send(s,result,sizeof(result),0);
+
+	return;*/
 }
 
 void deleteFile(int s){
-	int file_len;
+	int file_len = 0;
 	char file_len_str[10];
 	int file_exists;
 	char *status;
 	//get length of file and declare file name
 	memset(file_len_str,'\0',sizeof(file_len_str));
-	while(strlen(file_len_str)==0){
-		recv(s,file_len_str,sizeof(file_len_str),0);
+	while(file_len <= 0){
+		recv(s,&file_len,sizeof(file_len),0);
 	}
-	file_len = atoi(file_len_str);
+	//file_len = atoi(file_len_str);
 	char filename[file_len+1];
 	//receive file name from client
 	memset(filename,'\0',sizeof(filename));
 	while(strlen(filename)==0){
 		recv(s,filename,sizeof(filename),0);
 	}
+	printf("%s\n",filename);
 	//check if file exists
 	if (access(filename,F_OK)!=-1){
 		file_exists = 1;
 	} else {
 		file_exists = -1;
 	}
-	char *file_exists_str;
-	sprintf(file_exists_str,"%f",file_exists);
-	send(s,file_exists_str,sizeof(file_exists_str),0);
+	printf("%i\n",file_exists);
+	//sprintf(file_exists_str,"%f",file_exists);
+	send(s,&file_exists,sizeof(file_exists),0);
 	//wait for confirmation from client
+	//
 	while(strlen(status)==0){
 		recv(s,status,sizeof(status),0);
 	}
 	//if the client confirmation is Yes, delete file
 	if (strcmp(status,"Yes")){
-		char *ack2;
+		int ack2;
 		if (remove(filename)==1){
-			ack2 = "deleted file successfully";
+			ack2 = 1;
 		} else {
-			ack2 = "deleted file unsuccessfully";
+			ack2 = -1;
 		}
-		send(s,ack2,sizeof(ack2),0);
+		send(s,&ack2,sizeof(ack2),0);
 	}
 }
 
@@ -232,15 +269,19 @@ void listDirectory(int s){
 		//get directory size and send size to client
 		while (ep = readdir(dp)){
 			file = ep->d_name;
+			printf("%s\n",file);
 			size += sizeof(file);
 		}
+		printf("%i\n",size);
 		(void) closedir(dp);
 		send(s,&size,sizeof(size),0);
 		//sends over the directory
 		dp = opendir("./");
 		while (ep = readdir(dp)){
 			file = ep->d_name;
+			//printf("%s\n",file);
 			send(s,file,sizeof(file),0);
+			memset(file,'\0',sizeof(file));
 		}
 	}
 }

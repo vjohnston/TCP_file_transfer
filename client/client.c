@@ -141,8 +141,10 @@ void uploadFile(int s){
 	char filename[MAX_FILENAME];
 	int filelen;
 	char ack[4];
+	// ask user for file name
 	printf("Please enter filename you would like to send: ");
 	scanf("%s",filename);
+	// get length of file name and send it to the user. Also send filename
 	filelen = strlen(filename);
 	if (send(s,&filelen,sizeof(filelen),0)==-1){
 		perror("client send error."); exit(1);
@@ -150,28 +152,27 @@ void uploadFile(int s){
 	if (send(s,filename,sizeof(filename),0)==-1){
 		perror("client send error."); exit(1);
 	}
+	// recieve ack from server and check if it is valid- if it is not, return
 	memset(ack,'\0',sizeof(ack));
 	while(strlen(ack)==0)
 	{
 		recv(s,ack,sizeof(ack),0);
 	}
-
 	if(strcmp(ack,"ACK") != 0)
 	{
 		printf("ACK not received");
 		return;
 	}
-
+	// get the size of the file if the file exists
 	int32_t file_size = file_exists(filename);
-	printf("%i\n",file_size);
-	if(file_size == -1)
+	if(file_size < 0)
 	{
 		printf("File does not exist\n");
 		return;
 	}
 	printf("%i\n",file_size);
 	send(s,&file_size,sizeof(int32_t),0);
-	sendFile(s,filename);
+	/*sendFile(s,filename);
 
 	//open file and get md5 hash
 	int size = file_size;
@@ -216,7 +217,7 @@ void uploadFile(int s){
 	else
 	{
 		printf("%s\nSuccessful Transfer\n",result);
-	}
+	}*/
 }
 
 void listDirectory(int s){

@@ -108,13 +108,11 @@ void clientRequest(int s){
 
 void upload(int s){
 	int filename_len = 0;
-	char file_len_str[10];
 	int32_t filesize;
 	char md5client[100];
 	struct timeval tv;
 	float start_time, end_time, nBytes, throughput;
 	//get length of file and declare file name
-	memset(file_len_str,'\0',sizeof(file_len_str));
 	while(filename_len<=0){
 		recv(s,&filename_len,sizeof(filename_len),0);
 	}
@@ -137,12 +135,15 @@ void upload(int s){
 	//receive size of file
 	filesize = 0;
 	printf("%i\n",filesize);
-	while(filesize==0){
+	while(filesize == 0){
 		recv(s,&filesize,sizeof(int32_t),0);
 	}
-	filesize = 9;
+	if (filesize==-1){
+		return;
+	}
 	printf("%i\n",filesize);
-	//size = atoi(filesize);
+	fflush(stdout);
+	/*//size = atoi(filesize);
 	// Calculate starting time 
 	gettimeofday(&tv,NULL);
 	start_time = tv.tv_usec;
@@ -209,7 +210,7 @@ void upload(int s){
 	}
 	send(s,result,sizeof(result),0);
 
-	return;
+	return;*/
 }
 
 void deleteFile(int s){
