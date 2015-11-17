@@ -44,6 +44,7 @@ void sendFile(int s, char *filename)
 
 	while(fread(line,sizeof(char),sizeof(line),fp))
 	{
+		printf("%s",line);
 		send(s, line,sizeof(line),0);
 		memset(line,'\0',sizeof(line));
 	}
@@ -143,12 +144,19 @@ void uploadFile(int s){
 	char ack[4];
 	// ask user for file name
 	printf("Please enter filename you would like to send: ");
+	memset(filename,'\0',sizeof(filename));
 	scanf("%s",filename);
-	// get length of file name and send it to the user. Also send filename
+	// get length of file name and send it to the user
 	filelen = strlen(filename);
+	filelen = htonl(filelen);
 	if (send(s,&filelen,sizeof(filelen),0)==-1){
 		perror("client send error."); exit(1);
 	}
+	// send file size to the user
+	int32_t file_size = file_exists(filename);
+	file_size = htonl(file_size);
+	send(s,&file_size,sizeof(int32_t),0);
+	// send filename to the user
 	if (send(s,filename,sizeof(filename),0)==-1){
 		perror("client send error."); exit(1);
 	}
@@ -163,16 +171,7 @@ void uploadFile(int s){
 		printf("ACK not received");
 		return;
 	}
-	// get the size of the file if the file exists
-	int32_t file_size = file_exists(filename);
-	if(file_size < 0)
-	{
-		printf("File does not exist\n");
-		return;
-	}
-	printf("%i\n",file_size);
-	send(s,&file_size,sizeof(int32_t),0);
-	/*sendFile(s,filename);
+	sendFile(s,filename);
 
 	//open file and get md5 hash
 	int size = file_size;
@@ -217,29 +216,28 @@ void uploadFile(int s){
 	else
 	{
 		printf("%s\nSuccessful Transfer\n",result);
-	}*/
+	}
 }
 
 void listDirectory(int s){
 
 	int32_t size;
 	int n = 0;
-	int nBytes = 0;
-	char line[20000];
+	float nBytes = 0;
+	char file[100];
 	size = 0;
 	while(size == 0)
 	{
 		recv(s,&size,sizeof(size),0);
 	}
-	printf("%i\n",size);
-	memset(line,'\0',sizeof(line));
+	memset(file,'\0',sizeof(file));
 	while(nBytes < size)
 	{
-		n = recv(s,line,sizeof(line),0);
+		n = recv(s,file,sizeof(file),0);
 		nBytes += n;
-		printf("%s\n",line);
+		printf("%s\n",file);
 		fflush(stdout);
-		memset(line,'\0',sizeof(line));
+		memset(file,'\0',sizeof(file));
 	}
 
 }
@@ -248,8 +246,7 @@ void deleteFile(int s){
 	char filename[MAX_FILENAME];
 	int filelen;
 	printf("Please enter filename you would like to send: ");
-	scanf("%s",&filename);
-	printf("%s\n",filename);
+	scanf("%s",filename);
 	filelen = strlen(filename);
 	if (send(s,&filelen,sizeof(filelen),0)==-1){
 		perror("client send error."); exit(1);
@@ -270,10 +267,10 @@ void deleteFile(int s){
 
 	if(file_exists == -1)
 	{
-		printf("File does not exist");
+		printf("File does not exist\n");
 		return;
 	}
-	char* response;
+	char response[5];
 	printf("File Exists\nWould you like to delete the file? (Yes\\No)\n");
 	scanf("%s",response);
 
@@ -285,14 +282,13 @@ void deleteFile(int s){
 	{
 		recv(s,&ack,sizeof(ack),0);
 	}
-
 	if(ack == 1)
 	{
-		printf("File deleted successfully");
+		printf("File deleted successfully\n");
 	}
 	else
 	{
-		printf("File not deleted");
+		printf("File not deleted\n");
 	}
 
 }

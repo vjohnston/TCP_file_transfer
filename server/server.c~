@@ -107,64 +107,65 @@ void clientRequest(int s){
 }
 
 void upload(int s){
-	int filename_len = 0;
-	int32_t filesize;
+	int filename_len;
+	//int32_t filesize;
 	char md5client[100];
 	struct timeval tv;
 	float start_time, end_time, nBytes, throughput;
-	//get length of file and declare file name
+	//get length of file
 	while(filename_len<=0){
 		recv(s,&filename_len,sizeof(filename_len),0);
 	}
-	//filename_len = atoi(file_len_str);
-	printf("%i\n",filename_len);
+	// get file size
+	int32_t filesize = 0;
+	while (filesize==0){
+		recv(s,&filesize,sizeof(int32_t),0);
+	}
+	//printf("%i\n",filename_len);
 	char filename[filename_len+1];
 	//receive file name from client
 	memset(filename,'\0',sizeof(filename));
-	while(strlen(filename)==0){
+	while(strlen(filename)<filename_len){
 		recv(s,filename,sizeof(filename),0);
 	}
-
 	printf("%s\n",filename);
-	fflush(stdout);
 	//send ACK
 	char ack[4] = "ACK";
 	if(send(s,ack,sizeof(ack),0)==-1){
 		perror("Server send error!"); exit(1);
 	}
-	//receive size of file
-	filesize = 0;
 	printf("%i\n",filesize);
-	while(filesize == 0){
-		recv(s,&filesize,sizeof(int32_t),0);
-	}
-	if (filesize==-1){
-		return;
-	}
-	printf("%i\n",filesize);
-	fflush(stdout);
-	/*//size = atoi(filesize);
 	// Calculate starting time 
 	gettimeofday(&tv,NULL);
 	start_time = tv.tv_usec;
 	//receive file from client and save to filename
-	FILE *ofp = fopen(filename,"w");
+/*	char cwd[300];
+   	if (getcwd(cwd, sizeof(cwd)) != NULL){
+		strcat(cwd,"/");
+		strcat(cwd,filename);
+       		fprintf(stdout, "Current working dir: %s\n", cwd);
+	}
+	FILE *ofp = fopen(cwd,"wb");
+	if (!ofp){ 
+		printf("NO");		
+		return;
+	}
 	int n;
 	char line[20000];
 	memset(line,'\0',sizeof(line));
-	while (nBytes < filesize) {
+/*	while (nBytes < filesize) {
 		n=recv(s,line,sizeof(line),0);
 		nBytes += n;
 		fwrite(line,sizeof(char),n,ofp);
 		memset(line,'\0',sizeof(line));
 	}
 	// Calculate end time and throughput of file transfer
-	gettimeofday(&tv,NULL);
+	/*gettimeofday(&tv,NULL);
 	end_time = tv.tv_usec; //in microsecond
 	float RTT = (end_time-start_time) * pow(10,-6); //RTT in seconds
 	throughput = (nBytes*pow(10,-6))/RTT;
 	//recieve md5 hash
-	memset(md5client,'\0',sizeof(md5client));
+	/*memset(md5client,'\0',sizeof(md5client));
 	while(strlen(md5client)==0){
 		recv(s,md5client,sizeof(md5client),0);
 	}

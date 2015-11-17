@@ -107,43 +107,31 @@ void clientRequest(int s){
 }
 
 void upload(int s){
-	int filename_len = 0;
-	int32_t filesize;
+	int filename_len;
 	char md5client[100];
 	struct timeval tv;
 	float start_time, end_time, nBytes, throughput;
-	//get length of file and declare file name
-	while(filename_len<=0){
-		recv(s,&filename_len,sizeof(filename_len),0);
-	}
-	//filename_len = atoi(file_len_str);
-	printf("%i\n",filename_len);
+	//get length of file
+	recv(s,&filename_len,sizeof(filename_len),0);
+	filename_len = ntohl(filename_len);
+	// get file size
+	int32_t filesize = 0;
+	recv(s,&filesize,sizeof(int32_t),0);
+	filesize = ntohl(filesize);
+	//printf("%i\n",filename_len);
 	char filename[filename_len+1];
 	//receive file name from client
 	memset(filename,'\0',sizeof(filename));
-	while(strlen(filename)==0){
+	while(strlen(filename)<filename_len){
 		recv(s,filename,sizeof(filename),0);
 	}
-
 	printf("%s\n",filename);
-	fflush(stdout);
 	//send ACK
 	char ack[4] = "ACK";
 	if(send(s,ack,sizeof(ack),0)==-1){
 		perror("Server send error!"); exit(1);
 	}
-	//receive size of file
-	filesize = 0;
 	printf("%i\n",filesize);
-	while(filesize == 0){
-		recv(s,&filesize,sizeof(int32_t),0);
-	}
-	if (filesize==-1){
-		return;
-	}
-	printf("%i\n",filesize);
-	fflush(stdout);
-	/*//size = atoi(filesize);
 	// Calculate starting time 
 	gettimeofday(&tv,NULL);
 	start_time = tv.tv_usec;
@@ -195,11 +183,7 @@ void upload(int s){
 	char md5str[strlen(str)+1];
 	memcpy(md5str,str,strlen(str));
 	md5str[strlen(str)] = '\0';
-
-	//md5 = getMD5hash(filename);
-	// GET MD5 HASH SAME WAY AS RECEIVe
-	//compare md5 hash values. If they are the same send throughput
-	//
+	
 	printf("%s\n",md5client);
 	printf("%s\n",md5str);
 	char *result;
@@ -210,14 +194,14 @@ void upload(int s){
 	}
 	send(s,result,sizeof(result),0);
 
-	return;*/
+	return;
 }
 
 void deleteFile(int s){
 	int file_len = 0;
 	char file_len_str[10];
 	int file_exists;
-	char *status;
+	char status[5];
 	//get length of file and declare file name
 	memset(file_len_str,'\0',sizeof(file_len_str));
 	while(file_len <= 0){
@@ -230,58 +214,56 @@ void deleteFile(int s){
 	while(strlen(filename)==0){
 		recv(s,filename,sizeof(filename),0);
 	}
-	printf("%s\n",filename);
 	//check if file exists
 	if (access(filename,F_OK)!=-1){
 		file_exists = 1;
 	} else {
 		file_exists = -1;
 	}
-	printf("%i\n",file_exists);
 	//sprintf(file_exists_str,"%f",file_exists);
 	send(s,&file_exists,sizeof(file_exists),0);
 	//wait for confirmation from client
-	//
+	memset(status,'\0',sizeof(status));
 	while(strlen(status)==0){
 		recv(s,status,sizeof(status),0);
 	}
 	//if the client confirmation is Yes, delete file
 	if (strcmp(status,"Yes")){
 		int ack2;
-		if (remove(filename)==1){
-			ack2 = 1;
-		} else {
+		int result = remove(filename);
+		if (result!=0){
 			ack2 = -1;
+		} else {
+			ack2 = 1;
 		}
 		send(s,&ack2,sizeof(ack2),0);
 	}
 }
 
 void listDirectory(int s){
-	char *file, dir_size;
+	char *dir_size;
 	int32_t size = 0;
 	DIR *dp;
 	struct dirent *ep;
+	char fsend[100];
 
 	//open directory
 	dp = opendir("./");
 	if (dp!=NULL){
 		//get directory size and send size to client
 		while (ep = readdir(dp)){
-			file = ep->d_name;
-			printf("%s\n",file);
-			size += sizeof(file);
+			strcpy(fsend,ep->d_name);
+			size += sizeof(fsend);
+			memset(fsend,'\0',sizeof(fsend));
 		}
-		printf("%i\n",size);
 		(void) closedir(dp);
 		send(s,&size,sizeof(size),0);
 		//sends over the directory
 		dp = opendir("./");
 		while (ep = readdir(dp)){
-			file = ep->d_name;
-			//printf("%s\n",file);
-			send(s,file,sizeof(file),0);
-			memset(file,'\0',sizeof(file));
+			strcpy(fsend,ep->d_name);
+			send(s,fsend,sizeof(fsend),0);
+			memset(fsend,'\0',sizeof(fsend));
 		}
 	}
 }
@@ -290,7 +272,7 @@ int main(int argc, char* argv[])
 {
 	struct sockaddr_in sin;
 	int len;
-	char buf[MAX_LINE];
+	char buf[10];
 	int s, new_s;
 	int opt = 1;
 	int server_port;
@@ -334,24 +316,24 @@ int main(int argc, char* argv[])
 			perror("simplex-talk: accept");
 			exit(1);
 		}
+		int connected = 1;
+		while (connected){
+			while(strlen(buf)==0){
+				recv(new_s, buf, sizeof(buf), 0);
+			}
 
-
-		if((len=recv(new_s, buf, sizeof(buf), 0))==-1){
-			perror("Server Received Error!");
-			exit(1);
-		}
-		if (len==0) break;
-
-		if (strcmp(buf,"REQ")==0){
-			clientRequest(new_s);
-		} else if (strcmp(buf,"UPL")==0){
-			upload(new_s);
-		} else if (strcmp(buf,"DEL")==0){
-			deleteFile(new_s);
-		} else if (strcmp(buf,"LIS")==0){
-			listDirectory(new_s);
-		} else if (strcmp(buf,"XIT")==0){
-			close(new_s);
+			if (strcmp(buf,"REQ")==0){
+				clientRequest(new_s);
+			} else if (strcmp(buf,"UPL")==0){
+				upload(new_s);
+			} else if (strcmp(buf,"DEL")==0){
+				deleteFile(new_s);
+			} else if (strcmp(buf,"LIS")==0){
+				listDirectory(new_s);
+			} else if (strcmp(buf,"XIT")==0){
+				connected = 0;
+			}
+			memset(buf,'\0',sizeof(buf));
 		}
 	}
 }

@@ -44,6 +44,7 @@ void sendFile(int s, char *filename)
 
 	while(fread(line,sizeof(char),sizeof(line),fp))
 	{
+		printf("%s",line);
 		send(s, line,sizeof(line),0);
 		memset(line,'\0',sizeof(line));
 	}
@@ -143,13 +144,18 @@ void uploadFile(int s){
 	char ack[4];
 	// ask user for file name
 	printf("Please enter filename you would like to send: ");
-	scanf("%s",filename);
-	// get length of file name and send it to the user. Also send filename
+	memset(filename,'\0',sizeof(filename));
+	scanf("%s",&filename);
+	// get length of file name and send it to the user
 	filelen = strlen(filename);
 	if (send(s,&filelen,sizeof(filelen),0)==-1){
 		perror("client send error."); exit(1);
 	}
-	if (send(s,filename,sizeof(filename),0)==-1){
+	// send file size to the user
+	int32_t file_size = file_exists(filename);
+	send(s,&file_size,sizeof(int32_t),0);
+	// send filename to the user
+	if (send(s,filename,strlen(filename),0)==-1){
 		perror("client send error."); exit(1);
 	}
 	// recieve ack from server and check if it is valid- if it is not, return
@@ -162,23 +168,27 @@ void uploadFile(int s){
 	{
 		printf("ACK not received");
 		return;
+	} else {
+		printf("HH");
 	}
+	printf("%s\n",filename);
+	fflush(stdout);
 	// get the size of the file if the file exists
-	int32_t file_size = file_exists(filename);
+	/*int32_t file_size = file_exists(filename);
 	if(file_size < 0)
 	{
 		printf("File does not exist\n");
 		return;
 	}
-	printf("%i\n",file_size);
-	printf("size of int32_t: %i\n", sizeof(int32_t));
-	printf("size of file_size: %i\n",sizeof(file_size));
-	int32_t fs = htonl(file_size);
-	send(s,&fs,sizeof(int32_t),0);
-	/*sendFile(s,filename);
+	char file_size_str[10];
+	memset(file_size_str,'\0',sizeof(file_size_str));
+	sprintf(file_size_str,"%i",file_size);
+	printf("%s\n",file_size_str);
+	send(s,file_size_str,sizeof(file_size_str),0);*/
+	sendFile(s,filename);
 
 	//open file and get md5 hash
-	int size = file_size;
+	/*int size = file_size;
 	unsigned char md5[MD5_DIGEST_LENGTH];
 	char* file_buffer = (char*) malloc(20000);
 	int file_description;
