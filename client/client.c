@@ -36,23 +36,6 @@ int32_t file_exists(char * filename)
 	return -1;
 }
 
-void sendFile(int s, char *filename)
-{
-	char line[20000];
-	FILE *fp = fopen(filename, "r");
-	memset(line,'\0',sizeof(line));
-	size_t n = 1;
-	send(s,line,sizeof(line),0);
-
-	while(n = fread(line,sizeof(char),sizeof(line),fp))
-	{
-		printf("%i\n",n);
-		printf("%s\n",line);
-		send(s, line,n,0);
-		memset(line,'\0',sizeof(line));
-	}
-}
-
 void requestFile(int s){
 	char query[20];
 	char filename[MAX_FILENAME];
@@ -157,6 +140,7 @@ void uploadFile(int s){
 	}
 	// send file size to the user
 	int file_size = file_exists(filename);
+	int size = file_size;
 	file_size = htonl(file_size);
 	send(s,&file_size,sizeof(int32_t),0);
 	char test[10] = "hello how";
@@ -175,7 +159,7 @@ void uploadFile(int s){
 		printf("ACK not received");
 		return;
 	}
-	//sendFile(s,filename);
+	// send file to server
 	char line[20000];
 	FILE *fp = fopen(filename, "r");
 	memset(line,'\0',sizeof(line));
@@ -195,11 +179,9 @@ void uploadFile(int s){
 	int file_description;
 
 	file_description = open(filename,O_RDONLY);
-	file_buffer = mmap(0,file_size,PROT_READ,MAP_SHARED,file_description, 0);
-	printf("hi\n");
-	MD5((unsigned char*) file_buffer, (int) file_size, md5);
-	printf("hi\n");
-	munmap(file_buffer, file_size);
+	file_buffer = mmap(0,size,PROT_READ,MAP_SHARED,file_description, 0);
+	MD5((unsigned char*) file_buffer, (int) size, md5);
+	munmap(file_buffer, size);
 
 	//turn md5hash into a string
 	int i,j;
@@ -217,36 +199,34 @@ void uploadFile(int s){
 	char md5str[strlen(str)+1];
 	memcpy(md5str,str,strlen(str));
 	md5str[strlen(str)] = '\0';
+	//printf("%s\n",md5str);
 	send(s,md5str,strlen(str),0);
-
-	char *result;
-
+	// receive throughput if md5s match and display results
+	char result[150];
+	memset(result,'\0',sizeof(result));
 	while(strlen(result) == 0)
 	{
 		recv(s,result,sizeof(result),0);
 	}
 
-	if(!strcmp(result,"Unsuccessful transfer"))
-	{
+	if(!strcmp(result,"Unsuccessful transfer")){
 		printf("%s\n",result);
-	}
-	else
-	{
-		printf("%s\nSuccessful Transfer\n",result);
+	} else {
+		printf("Successful Transfer\n%s\n",result);
+		printf("File MD5sum: %s\n",md5str);
 	}
 }
 
 void listDirectory(int s){
-
-	int32_t size;
+	int size;
 	int n = 0;
 	float nBytes = 0;
 	char file[100];
 	size = 0;
-	while(size == 0)
-	{
-		recv(s,&size,sizeof(size),0);
-	}
+	// receive size from server
+	recv(s,&size,sizeof(int32_t),0);
+	size = ntohl(size);
+	// read in list of dir and print
 	memset(file,'\0',sizeof(file));
 	while(nBytes < size)
 	{
@@ -262,49 +242,34 @@ void listDirectory(int s){
 void deleteFile(int s){
 	char filename[MAX_FILENAME];
 	int filelen;
-	printf("Please enter filename you would like to send: ");
+	// ask user to enter filename
+	printf("Please enter filename you would like to delete: ");
 	scanf("%s",filename);
+	// send file length and name to server
 	filelen = strlen(filename);
-	if (send(s,&filelen,sizeof(filelen),0)==-1){
-		perror("client send error."); exit(1);
-	}
+	filelen = htonl(filelen);
+	send(s,&filelen,sizeof(int32_t),0);
 	if (send(s,filename,sizeof(filename),0)==-1){
 		perror("client send error."); exit(1);
 	}
-	
-	char*file_exists_str;
+	// receive from server if the file exists
 	int file_exists = 0;
-
-	while(file_exists == 0)
-	{
-		recv(s,&file_exists,sizeof(file_exists),0);
-	}
-
-	//file_exists = atoi(file_exists_str);
-
-	if(file_exists == -1)
-	{
+	recv(s,&file_exists,sizeof(int),0);
+	if(file_exists == -1){
 		printf("File does not exist\n");
 		return;
 	}
+	// confirm that user wants file to be deleted and send reply to server
 	char response[5];
 	printf("File Exists\nWould you like to delete the file? (Yes\\No)\n");
 	scanf("%s",response);
-
 	send(s,response,sizeof(response),0);
-
+	// receive ack from server if the file has been deleted or not
 	int ack;
-
-	while(ack==0)
-	{
-		recv(s,&ack,sizeof(ack),0);
-	}
-	if(ack == 1)
-	{
+	recv(s,&ack,sizeof(int),0);
+	if(ack == 1){
 		printf("File deleted successfully\n");
-	}
-	else
-	{
+	} else {
 		printf("File not deleted\n");
 	}
 

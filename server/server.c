@@ -120,32 +120,28 @@ void upload(int s){
 	int filesize = 0;
 	recv(s,&filesize,sizeof(int32_t),0);
 	filesize = ntohl(filesize);
-	//printf("%i\n",filename_len);
 	char filename[100];
 	//receive file name from client
 	memset(filename,'\0',sizeof(filename));
 	while(strlen(filename)<filename_len){
 		recv(s,filename,sizeof(filename),0);
 	}
-	printf("%s\n",filename);
 	//send ACK
 	char ack[4] = "ACK";
 	if(send(s,ack,sizeof(ack),0)==-1){
 		perror("Server send error!"); exit(1);
 	}
-	printf("%i\n",filesize);
 	// Calculate starting time 
 	gettimeofday(&tv,NULL);
 	start_time = tv.tv_usec;
 	//receive file from client and save to filename
-	//FILE *ofp = fopen(filename,"w");
-
 	FILE *fp = fopen(filename,"w");
 	if(!fp)
 	{
 		printf("File does not exist");
 		return;
 	}
+	// receive file from client
 	int n;
 	char line[20000];
 	memset(line,'\0',sizeof(line));
@@ -155,8 +151,6 @@ void upload(int s){
 	int rcvbufmax=sizeof(line);
 	if (rcvbufmax>filesize)
 		rcvbufmax=filesize;
-
-
 	/*while (nBytes < filesize) {
 		n=recv(s,line,sizeof(line),0);
 		nBytes += n;
@@ -166,33 +160,19 @@ void upload(int s){
 		memset(line,'\0',sizeof(line));
 	}*/
 	while ((recv_len=recv(s,recvbuf,rcvbufmax,0))>0){
-
-		printf("recv_len is %d\n", recv_len);
-
-		printf("recvbuf after recv: %s\n", recvbuf);
-
 		bytesrevd += recv_len;
-
 		int write_size = fwrite(recvbuf, sizeof (char), recv_len, fp);
-	char line2[20000];
-
-		printf("write_size is %d\n", write_size);
-
 		if (write_size<recv_len)
 			printf("File write failed!\n");
 		bzero(line, sizeof(line));
-
 		if (bytesrevd>=filesize) break;
-
 	}
-
-
 	fclose(fp);
 	// Calculate end time and throughput of file transfer
 	gettimeofday(&tv,NULL);
 	end_time = tv.tv_usec; //in microsecond
 	float RTT = (end_time-start_time) * pow(10,-6); //RTT in seconds
-	throughput = (nBytes*pow(10,-6))/RTT;
+	throughput = (bytesrevd*pow(10,-6))/RTT;
 	//recieve md5 hash
 	memset(md5client,'\0',sizeof(md5client));
 	while(strlen(md5client)==0){
@@ -225,51 +205,45 @@ void upload(int s){
 	char md5str[strlen(str)+1];
 	memcpy(md5str,str,strlen(str));
 	md5str[strlen(str)] = '\0';
-	
-	printf("%s\n",md5client);
-	printf("%s\n",md5str);
-	char *result;
+
+	// send result back to client. Check if md5 hashes match
+	char result[150];
+	memset(result,'\0',sizeof(result));
 	if (strcmp(md5client,md5str)==0){
-		snprintf(result,100,"%f",throughput);
+		snprintf(result,sizeof(result),"%i bytes received in %f seconds : %f Megabytes/sec",bytesrevd,RTT,throughput);
 	} else {
-		result = "Unsuccessful transfer";
+		strcpy(result,"Unsuccessful transfer");
 	}
 	send(s,result,sizeof(result),0);
 
 }
 
 void deleteFile(int s){
-	int file_len = 0;
-	char file_len_str[10];
+	int filename_len = 0;
 	int file_exists;
 	char status[5];
-	//get length of file and declare file name
-	memset(file_len_str,'\0',sizeof(file_len_str));
-	while(file_len <= 0){
-		recv(s,&file_len,sizeof(file_len),0);
-	}
-	//file_len = atoi(file_len_str);
-	char filename[file_len+1];
+	// receive the length of the file
+	recv(s,&filename_len,sizeof(filename_len),0);
+	filename_len = ntohl(filename_len);
+	char filename[filename_len+1];
 	//receive file name from client
 	memset(filename,'\0',sizeof(filename));
 	while(strlen(filename)==0){
 		recv(s,filename,sizeof(filename),0);
 	}
-	//check if file exists
+	//check if file exists and send result to client
 	if (access(filename,F_OK)!=-1){
 		file_exists = 1;
 	} else {
 		file_exists = -1;
 	}
-	//sprintf(file_exists_str,"%f",file_exists);
-	send(s,&file_exists,sizeof(file_exists),0);
+	send(s,&file_exists,sizeof(int),0);
 	//wait for confirmation from client
 	memset(status,'\0',sizeof(status));
 	while(strlen(status)==0){
 		recv(s,status,sizeof(status),0);
 	}
 	//if the client confirmation is Yes, delete file
-	char line2[20000];
 	if (strcmp(status,"Yes")){
 		int ack2;
 		int result = remove(filename);
@@ -278,17 +252,16 @@ void deleteFile(int s){
 		} else {
 			ack2 = 1;
 		}
-		send(s,&ack2,sizeof(ack2),0);
+		send(s,&ack2,sizeof(int),0);
 	}
 }
 
 void listDirectory(int s){
 	char *dir_size;
-	int32_t size = 0;
+	int size = 0;
 	DIR *dp;
 	struct dirent *ep;
 	char fsend[100];
-
 	//open directory
 	dp = opendir("./");
 	if (dp!=NULL){
@@ -299,7 +272,8 @@ void listDirectory(int s){
 			memset(fsend,'\0',sizeof(fsend));
 		}
 		(void) closedir(dp);
-		send(s,&size,sizeof(size),0);
+		size = htonl(size);
+		send(s,&size,sizeof(int32_t),0);
 		//sends over the directory
 		dp = opendir("./");
 		while (ep = readdir(dp)){
@@ -348,12 +322,12 @@ int main(int argc, char* argv[])
 	if ((bind(s, (struct sockaddr *)&sin, sizeof(sin))) < 0) {
 		perror("simplex-talk: bind"); exit(1);
 	}
-	if ((listen(s, MAX_PENDING))<0){
-		perror("simplex-talk: listen"); exit(1);
-	} 
 
 	/* wait for connection, then receive and print text */
 	while(1) {
+		if ((listen(s, MAX_PENDING))<0){
+			perror("simplex-talk: listen"); exit(1);
+		} 
 		if ((new_s = accept(s, (struct sockaddr *)&sin, &len)) < 0) {
 			perror("simplex-talk: accept");
 			exit(1);
