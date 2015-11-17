@@ -35,49 +35,31 @@ int32_t file_exists(char * filename)
 	return -1;
 }
 
-void sendFile(int s,char *filename){
-	// open file and get buffer. Send buffer to client
-	// send a line of 100 characters at a time (100 bytes)
-	char line[20000];
-	FILE *fp = fopen(filename, "r");
-	memset(line,'\0',sizeof(line));
-	size_t n = 1;
-
-	while (fread(line,sizeof(char),sizeof(line),fp))
-	{
-		send(s, line,sizeof(line),0);
-		memset(line,'\0',sizeof(line));
-	}
-}
-
 void clientRequest(int s){
 	int file_len;
 	char query[20] = "Enter filename:";
-	//char md5[16] = "hello there";
-	//char *md5;
-	//char md5[MAX_MD5LENGTH];
 	//send query to client
 	if(send(s,query,sizeof(query),0)==-1){
 		perror("Server send error!"); exit(1);
 	}
 	//get length of file and declare file name
-	while(file_len<=0){
-		recv(s,&file_len,sizeof(file_len),0);
-	}
-	char filename[file_len+1];
+	recv(s,&file_len,sizeof(file_len),0);
+	file_len = ntohl(file_len);
+	char filename[100];
 	//receive file name from client
 	memset(filename,'\0',sizeof(filename));
 	while(strlen(filename)<file_len){
 		recv(s,filename,sizeof(filename),0);
 	}
-	//check if file exists and return file size. -1 if it doesn't.
-	int32_t file_size = file_exists(filename);
-	send(s,&file_size,sizeof(int32_t),0);
+	// get file size
+	int file_size = file_exists(filename);
 	if (file_size < 0){
 		return;
 	}
-	// open file and get md5 hash
 	int size = file_size;
+	file_size = htonl(file_size);
+	send(s,&file_size,sizeof(int32_t),0);
+	// open file and get md5 hash
 	unsigned char md5[MD5_DIGEST_LENGTH];
 	char* file_buffer = (char*) malloc(20000);
 	int file_description;
@@ -105,7 +87,18 @@ void clientRequest(int s){
 	// send md5 hash
 	send(s,md5str,strlen(md5str),0);
 	//send file to client
-	sendFile(s,filename);
+	char line[20000];
+	FILE *fp = fopen(filename, "r");
+	memset(line,'\0',sizeof(line));
+	int len =0;
+	int sent_len=0;
+	while((len=fread(line,sizeof(char),sizeof(line),fp))>0)
+	{
+		//printf("%s",line);
+		sent_len=send(s,line,len,0);
+		memset(line,'\0',sizeof(line));
+	}
+	fclose(fp);
 }
 
 void upload(int s){
@@ -136,11 +129,6 @@ void upload(int s){
 	start_time = tv.tv_usec;
 	//receive file from client and save to filename
 	FILE *fp = fopen(filename,"w");
-	if(!fp)
-	{
-		printf("File does not exist");
-		return;
-	}
 	// receive file from client
 	int n;
 	char line[20000];
@@ -151,14 +139,6 @@ void upload(int s){
 	int rcvbufmax=sizeof(line);
 	if (rcvbufmax>filesize)
 		rcvbufmax=filesize;
-	/*while (nBytes < filesize) {
-		n=recv(s,line,sizeof(line),0);
-		nBytes += n;
-		printf("%s\n",line);
-		printf("%i\n",n);
-		fwrite(line,sizeof(char),n,ofp);
-		memset(line,'\0',sizeof(line));
-	}*/
 	while ((recv_len=recv(s,recvbuf,rcvbufmax,0))>0){
 		bytesrevd += recv_len;
 		int write_size = fwrite(recvbuf, sizeof (char), recv_len, fp);

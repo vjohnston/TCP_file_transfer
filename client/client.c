@@ -38,10 +38,9 @@ int32_t file_exists(char * filename)
 
 void requestFile(int s){
 	char query[20];
-	char filename[MAX_FILENAME];
-	char md5server[MAX_MD5LENGTH];
+	char filename[100];
+	char md5server[100];
 	int filelen;
-	int32_t filesize;
 	float nBytes, start_time, end_time, throughput;
 	struct timeval tv;
 	// receive query from server
@@ -55,6 +54,7 @@ void requestFile(int s){
 	scanf("%s",&filename);
 	// send length of filename and filename
 	filelen = strlen(filename);
+	filelen = htonl(filelen);
 	if (send(s,&filelen,sizeof(filelen),0)==-1){
 		perror("client send error."); exit(1);
 	}
@@ -62,38 +62,50 @@ void requestFile(int s){
 		perror("client send error."); exit(1);
 	}
 	// receive and decode file size
-	filesize = 0;
-	while (filesize==0){
-		recv(s,&filesize,sizeof(int32_t),0);
-	}
-	if (filesize==-1){
-		printf("File does not exist\n");
-		return;
-	}
+	int filesize = 0;
+	recv(s,&filesize,sizeof(int32_t),0);
+	filesize = ntohl(filesize);
 	// receive md5 hash from server
 	memset(md5server,'\0',sizeof(md5server));
-	while (strlen(md5server)<=0){
+	while(strlen(md5server)==0){
 		recv(s,md5server,sizeof(md5server),0);
 	}
+	md5server[strlen(md5server)] = '\0';
 	// Calculate starting time
 	gettimeofday(&tv,NULL);
 	start_time = tv.tv_usec;
 	// receive file from server
-	FILE *ofp = fopen(filename,"w");
+	// open file
+	FILE *fp = fopen(filename,"w");
+	if(!fp)
+	{
+		printf("File does not exist");
+		return;
+	}
+	// receive file from client
 	int n;
 	char line[20000];
 	memset(line,'\0',sizeof(line));
-	while (nBytes < filesize) {
-		n=recv(s,line,sizeof(line),0);
-		nBytes += n;
-		fwrite(line,sizeof(char),n,ofp);
-		memset(line,'\0',sizeof(line));
+	int recv_len=0;
+	int bytesrevd = 0;
+	char recvbuf[10000];
+	int rcvbufmax=sizeof(line);
+	if (rcvbufmax>filesize)
+		rcvbufmax=filesize;
+	while ((recv_len=recv(s,recvbuf,rcvbufmax,0))>0){
+		bytesrevd += recv_len;
+		int write_size = fwrite(recvbuf, sizeof (char), recv_len, fp);
+		if (write_size<recv_len)
+			printf("File write failed!\n");
+		bzero(line, sizeof(line));
+		if (bytesrevd>=filesize) break;
 	}
+	fclose(fp);
 	// get end time and throughput
 	gettimeofday(&tv,NULL);
 	end_time = tv.tv_usec; //in microsecond
 	float RTT = (end_time-start_time) * pow(10,-6); //RTT in seconds
-	throughput = (nBytes*pow(10,-6))/RTT;
+	throughput = (bytesrevd*pow(10,-6))/RTT;
 	// work out md5 hash of received file and compare them
 	int size = filesize;
 	unsigned char md5[MD5_DIGEST_LENGTH];
@@ -117,7 +129,9 @@ void requestFile(int s){
 	str[2*MD5_DIGEST_LENGTH]='\0';
 	// compare the md5 hashes
 	if (strcmp(md5server,str)==0){
-		printf("Transfer successful! Throughput: %f\n",throughput);
+		printf("Successful Transfer\n");
+		printf("%i bytes received in %f seconds : %f Megabytes/sec",bytesrevd,RTT,throughput);
+		printf("File MD5sum: %s\n",md5server);
 	} else {
 		printf("Transfer unsuccessful.\n");
 	}
@@ -143,7 +157,6 @@ void uploadFile(int s){
 	int size = file_size;
 	file_size = htonl(file_size);
 	send(s,&file_size,sizeof(int32_t),0);
-	char test[10] = "hello how";
 	// send filename to the user
 	if (send(s,filename,sizeof(filename),0)==-1){
 		perror("client send error."); exit(1);
