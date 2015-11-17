@@ -41,8 +41,10 @@ void sendFile(int s,char *filename){
 	char line[20000];
 	FILE *fp = fopen(filename, "r");
 	memset(line,'\0',sizeof(line));
+	size_t n = 1;
 
-	while (fread(line,sizeof(char),sizeof(line),fp)){
+	while (fread(line,sizeof(char),sizeof(line),fp))
+	{
 		send(s, line,sizeof(line),0);
 		memset(line,'\0',sizeof(line));
 	}
@@ -115,11 +117,11 @@ void upload(int s){
 	recv(s,&filename_len,sizeof(filename_len),0);
 	filename_len = ntohl(filename_len);
 	// get file size
-	int32_t filesize = 0;
+	int filesize = 0;
 	recv(s,&filesize,sizeof(int32_t),0);
 	filesize = ntohl(filesize);
 	//printf("%i\n",filename_len);
-	char filename[filename_len+1];
+	char filename[100];
 	//receive file name from client
 	memset(filename,'\0',sizeof(filename));
 	while(strlen(filename)<filename_len){
@@ -136,16 +138,56 @@ void upload(int s){
 	gettimeofday(&tv,NULL);
 	start_time = tv.tv_usec;
 	//receive file from client and save to filename
-	FILE *ofp = fopen(filename,"w");
+	//FILE *ofp = fopen(filename,"w");
+
+	FILE *fp = fopen(filename,"w");
+	if(!fp)
+	{
+		printf("File does not exist");
+		return;
+	}
 	int n;
 	char line[20000];
 	memset(line,'\0',sizeof(line));
-	while (nBytes < filesize) {
+	int recv_len=0;
+	int bytesrevd = 0;
+	char recvbuf[10000];
+	int rcvbufmax=sizeof(line);
+	if (rcvbufmax>filesize)
+		rcvbufmax=filesize;
+
+
+	/*while (nBytes < filesize) {
 		n=recv(s,line,sizeof(line),0);
 		nBytes += n;
+		printf("%s\n",line);
+		printf("%i\n",n);
 		fwrite(line,sizeof(char),n,ofp);
 		memset(line,'\0',sizeof(line));
+	}*/
+	while ((recv_len=recv(s,recvbuf,rcvbufmax,0))>0){
+
+		printf("recv_len is %d\n", recv_len);
+
+		printf("recvbuf after recv: %s\n", recvbuf);
+
+		bytesrevd += recv_len;
+
+		int write_size = fwrite(recvbuf, sizeof (char), recv_len, fp);
+	char line2[20000];
+
+		printf("write_size is %d\n", write_size);
+
+		if (write_size<recv_len)
+			printf("File write failed!\n");
+		bzero(line, sizeof(line));
+
+		if (bytesrevd>=filesize) break;
+
 	}
+
+
+	fclose(fp);
 	// Calculate end time and throughput of file transfer
 	gettimeofday(&tv,NULL);
 	end_time = tv.tv_usec; //in microsecond
@@ -194,7 +236,6 @@ void upload(int s){
 	}
 	send(s,result,sizeof(result),0);
 
-	return;
 }
 
 void deleteFile(int s){
@@ -228,6 +269,7 @@ void deleteFile(int s){
 		recv(s,status,sizeof(status),0);
 	}
 	//if the client confirmation is Yes, delete file
+	char line2[20000];
 	if (strcmp(status,"Yes")){
 		int ack2;
 		int result = remove(filename);

@@ -41,11 +41,14 @@ void sendFile(int s, char *filename)
 	char line[20000];
 	FILE *fp = fopen(filename, "r");
 	memset(line,'\0',sizeof(line));
+	size_t n = 1;
+	send(s,line,sizeof(line),0);
 
-	while(fread(line,sizeof(char),sizeof(line),fp))
+	while(n = fread(line,sizeof(char),sizeof(line),fp))
 	{
-		printf("%s",line);
-		send(s, line,sizeof(line),0);
+		printf("%i\n",n);
+		printf("%s\n",line);
+		send(s, line,n,0);
 		memset(line,'\0',sizeof(line));
 	}
 }
@@ -139,7 +142,7 @@ void requestFile(int s){
 
 void uploadFile(int s){
 	// get and send filename to server
-	char filename[MAX_FILENAME];
+	char filename[100];
 	int filelen;
 	char ack[4];
 	// ask user for file name
@@ -153,9 +156,10 @@ void uploadFile(int s){
 		perror("client send error."); exit(1);
 	}
 	// send file size to the user
-	int32_t file_size = file_exists(filename);
+	int file_size = file_exists(filename);
 	file_size = htonl(file_size);
 	send(s,&file_size,sizeof(int32_t),0);
+	char test[10] = "hello how";
 	// send filename to the user
 	if (send(s,filename,sizeof(filename),0)==-1){
 		perror("client send error."); exit(1);
@@ -171,18 +175,31 @@ void uploadFile(int s){
 		printf("ACK not received");
 		return;
 	}
-	sendFile(s,filename);
+	//sendFile(s,filename);
+	char line[20000];
+	FILE *fp = fopen(filename, "r");
+	memset(line,'\0',sizeof(line));
+	int len =0;
+	int sent_len=0;
+	while((len=fread(line,sizeof(char),sizeof(line),fp))>0)
+	{
+		//printf("%s",line);
+		sent_len=send(s,line,len,0);
+		memset(line,'\0',sizeof(line));
+	}
+	fclose(fp);
 
 	//open file and get md5 hash
-	int size = file_size;
 	unsigned char md5[MD5_DIGEST_LENGTH];
 	char* file_buffer = (char*) malloc(20000);
 	int file_description;
 
 	file_description = open(filename,O_RDONLY);
-	file_buffer = mmap(0,size,PROT_READ,MAP_SHARED,file_description, 0);
-	MD5((unsigned char*) file_buffer, size, md5);
-	munmap(file_buffer, size);
+	file_buffer = mmap(0,file_size,PROT_READ,MAP_SHARED,file_description, 0);
+	printf("hi\n");
+	MD5((unsigned char*) file_buffer, (int) file_size, md5);
+	printf("hi\n");
+	munmap(file_buffer, file_size);
 
 	//turn md5hash into a string
 	int i,j;
